@@ -435,7 +435,25 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
     busyMode(false);
     showChallenge(false);
     try { sessionStorage.setItem('vectra_passed', 'yes'); } catch (_) {}
-    setTimeout(() => { window.location.replace('main.html'); }, 900);
+    setTimeout(async () => {
+  try {
+    const response = await fetch('./site.html');
+
+    if (!response.ok) {
+      throw new Error('Не удалось загрузить сайт');
+    }
+
+    const html = await response.text();
+
+    document.open();
+    document.write(html);
+    document.close();
+
+  } catch (error) {
+    console.error(error);
+    alert('Ошибка загрузки сайта');
+  }
+}, 900);
   }
   async function submit() {
     if(busy || verified || !current || !selected.size)return;
