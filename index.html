@@ -1019,64 +1019,222 @@ function rps(p){
   }, 900);
 }
 
-// ---------- Крестики-нолики ----------
-function tttFind(b){
-  for (const L of LINES){
+
+ // ---------- Крестики-нолики ----------
+
+function tttFind(b) {
+  for (const L of LINES) {
     const [x, y, z] = L;
-    if (b[x] && b[x] === b[y] && b[y] === b[z]) return {p:b[x], line:L};
-  }
-  return null;
-}
-function tttCheck(g){
-  const w = tttFind(g.b);
-  if (w){ g.over = true; g.winner = w.p; g.line = w.line; return true; }
-  if (g.b.every(Boolean)){ g.over = true; g.winner = 'D'; return true; }
-  return false;
-}
-function tttBot(b){
-  const free = b.map((v,i) => v ? -1 : i).filter(i => i >= 0);
-  for (const p of ['O','X']){
-    for (const i of free){
-      const t = [...b]; t[i] = p;
-      const w = tttFind(t);
-      if (w && w.p === p) return i;
+
+    if (b[x] && b[x] === b[y] && b[y] === b[z]) {
+      return { p: b[x], line: L };
     }
   }
-  if (!b[4]) return 4;
-  const corners = [0,2,6,8].filter(i => !b[i]);
-  if (corners.length) return pick(corners);
+
+  return null;
+}
+
+function tttCheck(g) {
+  const w = tttFind(g.b);
+
+  if (w) {
+    g.over = true;
+    g.winner = w.p;
+    g.line = w.line;
+    return true;
+  }
+
+  if (g.b.every(Boolean)) {
+    g.over = true;
+    g.winner = 'D';
+    return true;
+  }
+
+  return false;
+}
+
+// Настройки сложности бота
+const TTT_AI = {
+  mistakeChance: 0.45,
+  blockChance: 0.55,
+  winChance: 0.85,
+  centerChance: 0.50
+};
+
+// Проверка возможного выигрышного хода
+function tttWinningMove(b, player) {
+  const free = b
+    .map((v, i) => v ? -1 : i)
+    .filter(i => i !== -1);
+
+  for (const i of free) {
+    const test = [...b];
+    test[i] = player;
+
+    const result = tttFind(test);
+
+    if (result && result.p === player) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+// Искусственный интеллект
+function tttBot(b) {
+  const free = b
+    .map((v, i) => v ? -1 : i)
+    .filter(i => i !== -1);
+
+  if (!free.length) return -1;
+
+  // 1. Бот пытается победить
+  const winning = tttWinningMove(b, 'O');
+
+  if (winning !== -1) {
+    if (Math.random() < TTT_AI.winChance) {
+      return winning;
+    }
+  }
+
+  // 2. Бот пытается заблокировать игрока
+  const blocking = tttWinningMove(b, 'X');
+
+  if (blocking !== -1) {
+    if (Math.random() < TTT_AI.blockChance) {
+      return blocking;
+    }
+
+    // Бот ошибается и не блокирует угрозу
+    const mistakes = free.filter(i => i !== blocking);
+
+    if (mistakes.length) {
+      return pick(mistakes);
+    }
+
+    return blocking;
+  }
+
+  // 3. Иногда бот делает случайный ход
+  if (Math.random() < TTT_AI.mistakeChance) {
+    return pick(free);
+  }
+
+  // 4. Иногда занимает центр
+  if (!b[4] && Math.random() < TTT_AI.centerChance) {
+    return 4;
+  }
+
+  // 5. Предпочитает углы
+  const corners = [0, 2, 6, 8].filter(i => !b[i]);
+
+  if (corners.length && Math.random() < 0.65) {
+    return pick(corners);
+  }
+
+  // 6. Иначе случайная свободная клетка
   return pick(free);
 }
-function tttDraw(){
-  const g = ttt, el = $('board');
+
+// Отрисовка игрового поля
+function tttDraw() {
+  const g = ttt;
+  const el = $('board');
+
   if (!g || !el) return;
-  el.innerHTML = g.b.map((v,i) => {
-    const cls = ['cell', v === 'X' ? 'c-x' : v === 'O' ? 'c-o' : '', i === g.last ? 'pop' : '', g.line && g.line.includes(i) ? 'win' : ''].join(' ');
-    return `<button class="${cls}" onclick="tttMove(${i})">${v === 'X' ? ic('tx','ic-xl') : v === 'O' ? ic('to','ic-xl') : ''}</button>`;
+
+  el.innerHTML = g.b.map((v, i) => {
+    const cls = [
+      'cell',
+      v === 'X' ? 'c-x' : v === 'O' ? 'c-o' : '',
+      i === g.last ? 'pop' : '',
+      g.line && g.line.includes(i) ? 'win' : ''
+    ].join(' ');
+
+    return `
+      <button
+        class="${cls}"
+        onclick="tttMove(${i})"
+        ${g.over || v ? 'disabled' : ''}
+      >
+        ${
+          v === 'X'
+            ? ic('tx', 'ic-xl')
+            : v === 'O'
+              ? ic('to', 'ic-xl')
+              : ''
+        }
+      </button>
+    `;
   }).join('');
 }
-function tttNew(){
-  ttt = {b: Array(9).fill(''), over: false, last: -1, line: null};
+
+// Новая партия
+function tttNew() {
+  ttt = {
+    b: Array(9).fill(''),
+    over: false,
+    winner: null,
+    last: -1,
+    line: null
+  };
+
   setResult('');
   tttDraw();
 }
-function tttMove(i){
+
+// Ход игрока
+function tttMove(i) {
   const g = ttt;
+
   if (!g || g.over || g.b[i]) return;
-  g.b[i] = 'X'; g.last = i;
-  if (!tttCheck(g)){
+
+  // Игрок ставит крестик
+  g.b[i] = 'X';
+  g.last = i;
+
+  // Проверяем победу игрока
+  if (!tttCheck(g)) {
     const bi = tttBot(g.b);
-    g.b[bi] = 'O'; g.last = bi;
-    tttCheck(g);
+
+    if (bi !== -1) {
+      // Ход бота
+      g.b[bi] = 'O';
+      g.last = bi;
+
+      tttCheck(g);
+    }
   }
+
   tttDraw();
-  if (g.over){
-    const u = me(); if (!u) return;
+
+  // Завершение партии
+  if (g.over) {
+    const u = me();
+
+    if (!u) return;
+
     const win = g.winner === 'X';
-    const msg = win ? 'Вы победили бота! +30 монет' : g.winner === 'O' ? 'Бот выиграл' : 'Ничья';
-    settle(u, win ? 30 : 0, win, win ? 8 : 3, 'Крестики-нолики', msg, win ? 12 : g.winner === 'O' ? -8 : 0);
+
+    const msg = win
+      ? 'Вы победили бота! +30 монет'
+      : g.winner === 'O'
+        ? 'Бот выиграл'
+        : 'Ничья';
+
+    settle(
+      u,
+      win ? 30 : 0,
+      win,
+      win ? 8 : 3,
+      'Крестики-нолики',
+      msg,
+      win ? 12 : g.winner === 'O' ? -8 : 0
+    );
   }
 }
+
 
 // ---------- Угадай число ----------
 function renderGuess(hint){
