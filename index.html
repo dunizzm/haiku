@@ -578,6 +578,110 @@ let wheelRot = 0;
 let wheelBusy = false;
 let bj = null;
 let mg = {pos:[0,1,2], mouse:-1, phase:'idle', stake:0, lift:-1};
+let activeGameId = null;
+
+// ---------- Античит: единый обработчик игровых действий ----------
+// Настройки доступны для изменения без правки логики игры.
+const ANTICHEAT_CONFIG = {
+  enabled: true,
+  clickWindowMs: 2000,
+  maxClicksInWindow: 24,
+  fishWindowMs: 60000,
+  maxFishCastsInWindow: 12,
+  tttPatternLength: 3,
+  tttPatternRepeats: 4,
+  historyWindowMs: 5 * 60 * 1000,
+  banMinutes: { autoclicker: 2, autofish: 4, repeated_ttt: 3 },
+  escalationMultiplier: 0.5,
+  maxEscalation: 2
+};
+const AC_STATE = {user:null, actions: [], clicks: [], fishCasts: [], noticeAt: 0};
+
+function antiCheat(event, forcedAction = ''){
+  if (!ANTICHEAT_CONFIG.enabled) return true;
+  const target = event?.target instanceof Element ? event.target : null;
+  const keyboardGame = event?.type === 'keydown' && activeGameId === 'snake' && !!KEYS[event.code];
+  const inGame = !!target?.closest('#gameView') || keyboardGame;
+  if (!inGame) return true;
+
+  // Кнопка «Назад» остаётся доступной даже во время временной блокировки.
+  const button = target?.closest('#gameView button');
+  const isBack = button?.getAttribute('onclick')?.includes('closeGame()');
+  if (isBack) return true;
+
+  const u = me();
+  if (!u) return true;
+  const now = Date.now();
+  if (AC_STATE.user !== session){
+    AC_STATE.user = session;
+    AC_STATE.actions = [];
+    AC_STATE.clicks = [];
+    AC_STATE.fishCasts = [];
+  }
+  u.antiCheat ??= {lockUntil:0, violations:0, lastReason:''};
+  if (u.antiCheat.lockUntil > now){
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (now - AC_STATE.noticeAt > 1500){
+      AC_STATE.noticeAt = now;
+      const left = Math.ceil((u.antiCheat.lockUntil - now) / 60000);
+      toast(`Игровые действия временно заблокированы. Осталось около ${left} мин.`, false);
+    }
+    return false;
+  }
+
+  let action = forcedAction;
+  if (!action && button){
+    action = button.getAttribute('onclick') || button.textContent.trim().slice(0,40) || 'button';
+    // Вкладки ставок в крестиках-ноликах важны для поиска повторяемой стратегии.
+    if (activeGameId === 'ttt') action = action.replace(/\s+/g, '');
+  }
+  if (!action) return true;
+
+  const reason = (type) => {
+    const base = ANTICHEAT_CONFIG.banMinutes[type] || 2;
+    const level = Math.max(0, (u.antiCheat.violations || 0));
+    const multiplier = 1 + Math.min(ANTICHEAT_CONFIG.maxEscalation, level) * ANTICHEAT_CONFIG.escalationMultiplier;
+    const minutes = Math.ceil(base * multiplier);
+    u.antiCheat.violations = level + 1;
+    u.antiCheat.lockUntil = now + minutes * 60000;
+    u.antiCheat.lastReason = type;
+    saveUsers();
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    toast(`Античит: ${type === 'autoclicker' ? 'слишком частые клики' : type === 'autofish' ? 'подозрительно частая рыбалка' : 'повтор одной стратегии в крестиках-ноликах'}. Блокировка на ${minutes} мин.`, false);
+    return false;
+  };
+
+  AC_STATE.actions = AC_STATE.actions.filter(x => now - x.t <= ANTICHEAT_CONFIG.historyWindowMs);
+  AC_STATE.clicks = AC_STATE.clicks.filter(t => now - t <= ANTICHEAT_CONFIG.clickWindowMs);
+  AC_STATE.fishCasts = AC_STATE.fishCasts.filter(t => now - t <= ANTICHEAT_CONFIG.fishWindowMs);
+
+  if (event.type === 'click' || event.type === 'pointerdown'){
+    AC_STATE.clicks.push(now);
+    if (AC_STATE.clicks.length >= ANTICHEAT_CONFIG.maxClicksInWindow) return reason('autoclicker');
+  }
+
+  if (action === 'fish:cast'){
+    AC_STATE.fishCasts.push(now);
+    if (AC_STATE.fishCasts.length >= ANTICHEAT_CONFIG.maxFishCastsInWindow) return reason('autofish');
+  }
+
+  const game = activeGameId || 'unknown';
+  AC_STATE.actions.push({t:now, game, a:action});
+  if (game === 'ttt'){
+    const n = ANTICHEAT_CONFIG.tttPatternLength;
+    const recent = AC_STATE.actions.filter(x => x.game === 'ttt').map(x => x.a);
+    if (recent.length >= n * ANTICHEAT_CONFIG.tttPatternRepeats){
+      const pattern = recent.slice(-n).join('|');
+      let repeats = 0;
+      for (let i = 0; i <= recent.length - n; i++)
+        if (recent.slice(i, i + n).join('|') === pattern) repeats++;
+      if (repeats >= ANTICHEAT_CONFIG.tttPatternRepeats) return reason('repeated_ttt');
+    }
+  }
+  return true;
+}
 
 // ---------- Пользователь и хранилище ----------
 function normalize(u){
@@ -2279,6 +2383,7 @@ function render(){
 
 function openGame(id){
   const g = GAMES.find(x => x.id === id);
+  activeGameId = id;
   $('hub').classList.add('hidden');
   const gv = $('gameView');
   gv.classList.remove('hidden');
@@ -2291,6 +2396,7 @@ function openGame(id){
 function closeGame(){
   stopFish();
   stopSnake();
+  activeGameId = null;
   $('gameView').classList.add('hidden');
   $('gameView').innerHTML = '';
   $('hub').classList.remove('hidden');
@@ -2305,6 +2411,24 @@ function setTab(t){
 
 // ---------- Инициализация ----------
 document.querySelectorAll('[data-ic]').forEach(el => el.innerHTML = ic(el.dataset.ic, el.dataset.cls || ''));
+
+// Один метод получает игровые действия из мыши, рыбалки и клавиатурного управления змейкой.
+document.addEventListener('click', e => {
+  if (e.target instanceof Element && e.target.closest('#gameView button')) antiCheat(e);
+}, true);
+document.addEventListener('pointerdown', e => {
+  if (!(e.target instanceof Element) || !e.target.closest('#fishCv') || !FS) return;
+  let action = '';
+  if (FS.state === 'bite') action = 'fish:hook';
+  else if (FS.state === 'idle'){
+    const p = toLog(e);
+    if (p.x >= 250 && p.y >= 178) action = 'fish:cast';
+  }
+  if (action) antiCheat(e, action);
+}, true);
+document.addEventListener('keydown', e => {
+  if (activeGameId === 'snake' && KEYS[e.code]) antiCheat(e, 'snake:' + e.code);
+}, true);
 
 $('hub').innerHTML = GAMES.map(g => `
   <button class="gcard" style="--c:${g.color}" onclick="openGame('${g.id}')">
