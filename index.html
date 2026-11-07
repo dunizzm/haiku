@@ -458,8 +458,8 @@ const SYM_MULT = [3,4,5,8,10];
 const LBL = {h:'Орёл', t:'Решка'};
 const FISH = {
   cost: 0,
-  kilka: {gross:14, xp:4,  mmr:6,  name:'килька'},
-  gold:  {gross:45, xp:10, mmr:10, name:'золотая килька'},
+  kilka: {gross:7, xp:4,  mmr:6,  name:'килька'},
+  gold:  {gross:35, xp:10, mmr:10, name:'золотая килька'},
   pikePen: 8,
   pikeMmr: -4,
 };
@@ -1406,7 +1406,7 @@ const HAND = {x:168, y:104};
 function fishView(){
   return `<div class="fish-wrap"><canvas id="fishCv" width="720" height="380" aria-label="Рыбалка на кильку"></canvas></div>
     <div class="fish-hud"><span id="fishMsg">Кликните по воде справа от пирса, чтобы закинуть удочку</span><span class="pill">${ic('fish')}Улов&nbsp;<b id="fishCount">0</b></span></div>
-    <p class="muted">Заброс стоит 10 монет. Когда поплавок резко уйдёт под воду, кликните, чтобы подсечь. Золотая килька даёт больше, а щука отбирает монеты.</p>`;
+    <p class="muted">Заброс бесплатный. Когда поплавок резко уйдёт под воду, кликните, чтобы подсечь. Золотая килька даёт больше, а щука отбирает монеты.</p>`;
 }
 function setFishMsg(t){ setText('fishMsg', t); }
 function toLog(e){
